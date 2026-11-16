@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "My Task",
+  "short_name": "My Task",
+  "description": "毎日を、ひとつずつ。自分専用のタスク管理。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#172b4d",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
