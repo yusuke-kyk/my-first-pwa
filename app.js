@@ -9,6 +9,60 @@
   const store = MyTask.createStore(storage,key);
   let activeType = 'short', editingId = null, pendingRestore = null;
   let editOpener;
+  let currentScreen = 'home', shortSort = 'created';
+  const screenTitles = {home:'My Task',add:'タスクを追加',settings:'設定'};
+  const screenCaptions = {home:'毎日を、ひとつずつ。',add:'やることを、ひとつずつ。',settings:'自分のペースで、使いやすく。'};
+  function showScreen(name,keepMessage=false) {
+    if (!screenTitles[name]) return;
+    currentScreen=name;
+    for(const screen of document.querySelectorAll('.screen'))screen.hidden=screen.id!=='screen-'+name;
+    for(const button of document.querySelectorAll('[data-screen]')){
+      if(button.dataset.screen===name)button.setAttribute('aria-current','page');
+      else button.removeAttribute('aria-current');
+    }
+    $('#screen-heading').textContent=screenTitles[name];
+    $('#screen-caption').textContent=screenCaptions[name];
+    if(!keepMessage && !store.loadError)announce('');
+    if(name==='home')render();
+    window.scrollTo(0,0);
+    $('#screen-heading').focus({preventScroll:true});
+  }
+  for(const button of document.querySelectorAll('[data-screen],[data-go]')){
+    button.addEventListener('click',()=>showScreen(button.dataset.screen || button.dataset.go));
+  }
+
+  // 固定ナビの実寸（セーフエリアを含む）をスクロール余白に反映します。
+  const nav = $('.bottom-nav');
+  function measureNavigation() {
+    if(nav.getClientRects().length)document.documentElement.style.setProperty('--nav-height',nav.getBoundingClientRect().height+'px');
+  }
+  if('ResizeObserver' in window)new ResizeObserver(measureNavigation).observe(nav);
+  window.addEventListener('resize',measureNavigation);
+  measureNavigation();
+  const viewport = window.visualViewport;
+  if(viewport) {
+    let fullHeight = Math.max(window.innerHeight,viewport.height);
+    function updateViewport(reveal=false) {
+      const focused=document.activeElement;
+      const editing=focused?.matches('input:not([type=file]),textarea,[contenteditable=true]');
+      if(!editing)fullHeight=Math.max(window.innerHeight,viewport.height);
+      const keyboardOpen=!!editing && viewport.scale<=1.05 && fullHeight-viewport.height>150;
+      document.documentElement.classList.toggle('keyboard-open',keyboardOpen);
+      document.documentElement.style.setProperty('--visible-height',viewport.height+'px');
+      if(!keyboardOpen)measureNavigation();
+      if(keyboardOpen && reveal)requestAnimationFrame(()=>{
+        const rect=focused.getBoundingClientRect();
+        const bottom=viewport.offsetTop+viewport.height-20;
+        if(rect.bottom>bottom)window.scrollBy(0,rect.bottom-bottom);
+      });
+    }
+    viewport.addEventListener('resize',()=>updateViewport(true));
+    viewport.addEventListener('scroll',()=>updateViewport());
+    document.addEventListener('focusin',()=>updateViewport(true));
+    document.addEventListener('focusout',()=>requestAnimationFrame(()=>updateViewport()));
+    window.addEventListener('orientationchange',()=>{fullHeight=window.innerHeight;});
+    updateViewport();
+  }
   function announce(text,error=false) {
     $('#message').textContent = text;
     $('#message').classList.toggle('error',error);
@@ -31,10 +85,12 @@
   }
   function render() {
     const tasks=store.tasks;
-    const visible=MyTask.sortTasks(tasks.filter(t=>t.type===activeType),activeType==='short' ? $('#sort').value : 'created');
+    const visible=MyTask.sortTasks(tasks.filter(t=>t.type===activeType),activeType==='short' ? shortSort : 'created');
     $('#task-list').replaceChildren();
+    $('#completed-list').replaceChildren();
     for(const task of visible) {
       const row=document.createElement('li');row.dataset.id=task.id;
+      row.classList.add('task-row');
       row.classList.toggle('done',task.done);
       const content=document.createElement('div');content.className='task-content';
       const toggle=document.createElement('button');toggle.type='button';toggle.className='toggle';
@@ -46,7 +102,8 @@
       toggle.append(check,title);
       toggle.addEventListener('click',()=>{
         if(change(()=>store.toggle(task.id),task.done?'未完了に戻しました。':'タスクを完了しました。')) {
-          [...$('#task-list').children].find(el=>el.dataset.id===task.id)?.querySelector('.toggle').focus();
+          if(!task.done)$('#completed-summary').focus();
+          else [...$('#task-list').children].find(el=>el.dataset.id===task.id)?.querySelector('.toggle').focus();
         }
       });
       const metadata=document.createElement('div');metadata.className='metadata';
@@ -63,34 +120,49 @@
       remove.setAttribute('aria-label',task.text+'を削除');
       remove.addEventListener('click',()=>{
         if(!confirm('「'+task.text+'」を削除しますか？'))return;
-        if(change(()=>store.remove(task.id),'タスクを削除しました。'))$('#task-input').focus();
+        if(change(()=>store.remove(task.id),'タスクを削除しました。'))$('#screen-heading').focus();
       });
-      content.append(toggle,metadata);actions.append(edit,remove);row.append(content,actions);$('#task-list').append(row);
+      content.append(toggle,metadata);actions.append(edit,remove);row.append(content,actions);
+      $(task.done?'#completed-list':'#task-list').append(row);
     }
     const done=tasks.filter(t=>t.done).length;
     $('#remaining').textContent=tasks.length-done;
-    $('#total').textContent=visible.length+'件';
+    const pendingCount=visible.filter(t=>!t.done).length;
+    const completedCount=visible.length-pendingCount;
+    $('#total').textContent=pendingCount+'件';
+    $('#completed-summary').textContent='完了済み '+completedCount+'件';
+    $('#completed-empty').hidden=completedCount>0;
     $('#progress').textContent=tasks.length ? tasks.length+'件中 '+done+'件完了。'+(done===tasks.length?'おつかれさまでした！':'ひとつずつ進めましょう。') : '今日も自分のペースで。';
     $('#progress-fill').style.width=(tasks.length?done/tasks.length*100:0)+'%';
-    $('#empty').hidden=visible.length>0;
-    $('#empty h3').textContent=(activeType==='short'?'短期':'長期')+'タスクはありません';
+    $('#progress-percent').textContent=(tasks.length?Math.round(done/tasks.length*100):0)+'%';
+    $('#progress-bar').setAttribute('aria-valuenow',String(tasks.length?Math.round(done/tasks.length*100):0));
+    $('#empty').hidden=pendingCount>0;
+    $('#empty h3').textContent=(activeType==='short'?'短期':'長期')+'の未完了タスクはありません';
     $('#sort').disabled=activeType==='long';
+    $('#sort').value=activeType==='short'?shortSort:'created';
     for(const button of document.querySelectorAll('[role="tab"]')) {
       const selected=button.dataset.type===activeType;
       button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;
     }
     $('#task-panel').setAttribute('aria-labelledby','tab-'+activeType);
     const upcoming=tasks.filter(t=>MyTask.deadline(t)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+    $('#upcoming').hidden=upcoming.length===0;
     $('#upcoming-list').replaceChildren();
-    $('#upcoming-summary').textContent='締切の確認 · '+upcoming.length+'件';
+    $('#upcoming-extra').replaceChildren();
+    $('#upcoming-more').hidden=upcoming.length<=2;
+    $('#upcoming-more-summary').textContent='ほか '+Math.max(0,upcoming.length-2)+'件を表示';
+    $('#upcoming-count').textContent=upcoming.length+'件';
     $('#upcoming-empty').hidden=upcoming.length>0;
-    for(const task of upcoming) {
+    for(const [index,task] of upcoming.entries()) {
       const item=document.createElement('li');
       const button=document.createElement('button');button.type='button';button.className='upcoming-task';
       button.textContent=task.text+'（'+(task.type==='short'?'短期':'長期')+'）';
       button.addEventListener('click',()=>openEdit(task,button));
-      item.append(button,badge(dueLabels[MyTask.deadline(task)],MyTask.deadline(task)),badge(task.dueDate));
-      $('#upcoming-list').append(item);
+      const status=MyTask.deadline(task);
+      const label=status==='overdue'?'期限切れ':status==='today'?'今日':task.dueDate.slice(5).replace('-','/');
+      item.append(button,badge(label,status));
+      item.title='締切 '+task.dueDate;
+      $(index<2?'#upcoming-list':'#upcoming-extra').append(item);
     }
   }
   function syncPriority(prefix) {
@@ -110,7 +182,9 @@
     const options=fields('new');
     const before=activeType;activeType=options.type;
     if(change(()=>store.add($('#task-input').value,id,options),'追加して保存しました。')) {
-      $('#task-input').value='';$('#new-due').value='';$('#task-input').focus();
+      $('#task-input').value='';$('#new-due').value='';
+      if(event.submitter?.value==='continue')$('#task-input').focus();
+      else showScreen('home',true);
     } else {activeType=before;}
   });
   $('#edit-form').addEventListener('submit',event=>{
@@ -126,7 +200,7 @@
   $('#edit-cancel').addEventListener('click',()=>$('#edit-dialog').close());
   $('#edit-dialog').addEventListener('close',()=>{
     $('#edit-error').textContent='';
-    if(editOpener?.isConnected)editOpener.focus();else $('#task-input').focus();
+    if(editOpener?.isConnected && editOpener.getClientRects().length)editOpener.focus();else $('#screen-heading').focus();
   });
   const tabs=[...document.querySelectorAll('[role="tab"]')];
   for(const tab of tabs) {
@@ -138,7 +212,7 @@
       tabs[index].click();tabs[index].focus();
     });
   }
-  $('#sort').addEventListener('change',render);
+  $('#sort').addEventListener('change',()=>{shortSort=$('#sort').value;render();});
   $('#export').addEventListener('click',()=>{
     try {
       const blob=new Blob([store.exportJSON()],{type:'application/json'});

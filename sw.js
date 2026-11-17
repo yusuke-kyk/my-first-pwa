@@ -1,6 +1,6 @@
 'use strict';
 const PREFIX = 'my-task-' + self.registration.scope + ':';
-const CACHE = PREFIX + 'v1.1';
+const CACHE = PREFIX + 'v1.2-ui1';
 const ASSETS = ['./', './index.html', './styles.css', './tasks.js', './app.js', './manifest.webmanifest', './icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', event => {
   // ブラウザのHTTPキャッシュから旧版を再利用しない。
@@ -15,9 +15,7 @@ self.addEventListener('activate', event => {
     const names = await caches.keys();
     await Promise.all(names.filter(name => name.startsWith(PREFIX) && name !== CACHE).map(name => caches.delete(name)));
     await self.clients.claim();
-    // Ver.1.0には更新バナーがないため、旧画面も新バージョンに切り替える。
-    const windows = await self.clients.matchAll({type:'window'});
-    await Promise.all(windows.filter(client=>client.url.startsWith(self.registration.scope)).map(client=>client.navigate(client.url)));
+    // 画面の再読み込みはapp.jsのcontrollerchangeに任せ、二重遷移を避けます。
   })());
 });
 self.addEventListener('fetch', event => {
